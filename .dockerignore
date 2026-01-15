@@ -1,0 +1,32 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+gofiler
+
+# Test
+*.test
+*.out
+
+# Files directory (will be mounted as volume)
+files/
+
+# Docker
+Dockerfile
+docker-compose.yml
+
+# Documentation
+README.md
+file-server/

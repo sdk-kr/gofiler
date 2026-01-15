@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  gofiler:
+    build: .
+    container_name: gofiler
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./files:/root/files
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Seoul
+      - API_KEY=${API_KEY:-my_secure_api_key_12345}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-100}
+      - PORT=${PORT:-9999}
+    env_file:
+      - .env
