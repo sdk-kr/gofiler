@@ -96,7 +96,8 @@ func respondWithProblem(c *gin.Context, status int, detail string) {
 // 고유한 파일명 생성 함수
 func generateUniqueFilename(originalFilename string) string {
 	ext := filepath.Ext(originalFilename)
-	uniqueName := uuid.New().String() + ext
+	// UUID 앞 8자리만 사용 (충돌 확률: 1/4,294,967,296)
+	uniqueName := uuid.New().String()[:8] + ext
 	return uniqueName
 }
 
