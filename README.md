@@ -102,11 +102,11 @@ curl -X POST "http://127.0.0.1:9999/upload" \
 ```json
 {
   "message": "파일이 성공적으로 업로드되었습니다.",
-  "filename": "550e8400-e29b-41d4-a716-446655440000.jpg",
+  "filename": "b83dd18a.jpg",
   "original_filename": "example.jpg",
   "size": 102400,
-  "download_url": "/files/550e8400-e29b-41d4-a716-446655440000.jpg",
-  "view_url": "/view/550e8400-e29b-41d4-a716-446655440000.jpg"
+  "download_url": "/files/b83dd18a.jpg",
+  "view_url": "/view/b83dd18a.jpg"
 }
 ```
 
@@ -115,7 +115,7 @@ curl -X POST "http://127.0.0.1:9999/upload" \
 - **설명**: 업로드된 파일을 다운로드
 
 ```bash
-curl -O "http://127.0.0.1:9999/files/550e8400-e29b-41d4-a716-446655440000.jpg"
+curl -O "http://127.0.0.1:9999/files/b83dd18a.jpg"
 ```
 
 ### 3. 파일 보기/다운로드 (인증 불필요)
@@ -124,7 +124,7 @@ curl -O "http://127.0.0.1:9999/files/550e8400-e29b-41d4-a716-446655440000.jpg"
 
 ```bash
 # 브라우저에서 접근
-http://127.0.0.1:9999/view/550e8400-e29b-41d4-a716-446655440000.jpg
+http://127.0.0.1:9999/view/b83dd18a.jpg
 ```
 
 **동작 방식:**
@@ -178,9 +178,9 @@ n8n 워크플로우에서 이 API를 사용하는 방법:
 ```json
 {
   "message": "파일이 성공적으로 업로드되었습니다.",
-  "filename": "550e8400-e29b-41d4-a716-446655440000.jpg",
-  "download_url": "/files/550e8400-e29b-41d4-a716-446655440000.jpg",
-  "view_url": "/view/550e8400-e29b-41d4-a716-446655440000.jpg"
+  "filename": "b83dd18a.jpg",
+  "download_url": "/files/b83dd18a.jpg",
+  "view_url": "/view/b83dd18a.jpg"
 }
 ```
 
