@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -57,6 +59,51 @@ type ErrorResponse struct {
 type RootResponse struct {
 	Message   string            `json:"message"`
 	Endpoints map[string]string `json:"endpoints"`
+}
+
+// 파일 형식 정보 구조체
+type FileTypeInfo struct {
+	Extension string
+	MimeType  string
+}
+
+// 매직 넘버 (파일 시그니처) 정의
+var magicNumbers = map[string]FileTypeInfo{
+	// 이미지 형식
+	"\x89PNG\r\n\x1a\n":    {".png", "image/png"},
+	"\xff\xd8\xff":         {".jpg", "image/jpeg"},
+	"GIF87a":               {".gif", "image/gif"},
+	"GIF89a":               {".gif", "image/gif"},
+	"RIFF":                 {".webp", "image/webp"}, // RIFF....WEBP (부분 매칭)
+	// 오디오 형식
+	"\xff\xfb":             {".mp3", "audio/mpeg"}, // MP3 프레임 헤더
+	"\xff\xfa":             {".mp3", "audio/mpeg"},
+	"\xff\xf3":             {".mp3", "audio/mpeg"},
+	"\xff\xf2":             {".mp3", "audio/mpeg"},
+	"ID3":                  {".mp3", "audio/mpeg"}, // MP3 with ID3 tag
+	"OggS":                 {".ogg", "audio/ogg"},
+	// 비디오 형식
+	"\x00\x00\x00\x18ftypmp4": {".mp4", "video/mp4"},
+	"\x00\x00\x00\x1cftypmp4": {".mp4", "video/mp4"},
+	"\x00\x00\x00\x20ftypmp4": {".mp4", "video/mp4"},
+	"ftyp":                    {".mp4", "video/mp4"}, // 일반적인 MP4 매칭
+	// 문서 형식
+	"%PDF":                 {".pdf", "application/pdf"},
+	"PK\x03\x04":           {".zip", "application/zip"},
+}
+
+// MIME 타입에서 확장자 매핑
+var mimeToExtension = map[string]string{
+	"image/png":       ".png",
+	"image/jpeg":      ".jpg",
+	"image/gif":       ".gif",
+	"image/webp":      ".webp",
+	"audio/mpeg":      ".mp3",
+	"audio/wav":       ".wav",
+	"audio/ogg":       ".ogg",
+	"video/mp4":       ".mp4",
+	"application/pdf": ".pdf",
+	"application/zip": ".zip",
 }
 
 // RFC 9457 Problem Detail 생성 헬퍼 함수
@@ -168,21 +215,120 @@ func downloadFileFromURL(url string) ([]byte, string, error) {
 	return content, filename, nil
 }
 
+// Base64 데이터 디코딩 함수
+func decodeBase64File(base64Data string) ([]byte, string, error) {
+	var data string
+	var mimeType string
+
+	// Data URL 형식 확인 (data:image/png;base64,...)
+	if strings.HasPrefix(base64Data, "data:") {
+		// data:image/png;base64,iVBORw0... 형식 파싱
+		parts := strings.SplitN(base64Data, ",", 2)
+		if len(parts) != 2 {
+			return nil, "", fmt.Errorf("잘못된 Data URL 형식입니다")
+		}
+
+		// MIME 타입 추출
+		mimeType = extractMimeTypeFromDataURL(parts[0])
+		data = parts[1]
+	} else {
+		// 순수 base64 데이터
+		data = base64Data
+	}
+
+	// Base64 디코딩
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		// URL-safe base64 시도
+		decoded, err = base64.URLEncoding.DecodeString(data)
+		if err != nil {
+			// padding 없는 경우 시도
+			decoded, err = base64.RawStdEncoding.DecodeString(data)
+			if err != nil {
+				return nil, "", fmt.Errorf("Base64 디코딩 실패: %v", err)
+			}
+		}
+	}
+
+	return decoded, mimeType, nil
+}
+
+// 바이트 데이터에서 파일 형식 감지 함수
+func detectFileTypeFromBytes(data []byte) (string, string) {
+	// 매직 넘버로 파일 형식 감지
+	for magic, info := range magicNumbers {
+		if len(data) >= len(magic) && bytes.HasPrefix(data, []byte(magic)) {
+			// WebP 특수 처리: RIFF로 시작하고 WEBP 포함 확인
+			if magic == "RIFF" && len(data) >= 12 {
+				if !bytes.Equal(data[8:12], []byte("WEBP")) {
+					continue // RIFF이지만 WEBP가 아님
+				}
+			}
+			return info.Extension, info.MimeType
+		}
+	}
+
+	// MP4 특수 처리: ftyp가 4바이트 이후에 올 수 있음
+	if len(data) >= 12 {
+		if bytes.Contains(data[:12], []byte("ftyp")) {
+			return ".mp4", "video/mp4"
+		}
+	}
+
+	// WAV 파일 감지: RIFF....WAVE
+	if len(data) >= 12 && bytes.HasPrefix(data, []byte("RIFF")) {
+		if bytes.Equal(data[8:12], []byte("WAVE")) {
+			return ".wav", "audio/wav"
+		}
+	}
+
+	// 기본값
+	return ".bin", "application/octet-stream"
+}
+
+// Data URL에서 MIME 타입 추출 함수
+func extractMimeTypeFromDataURL(dataURL string) string {
+	// data:image/png;base64 형식에서 image/png 추출
+	// "data:" 제거
+	withoutPrefix := strings.TrimPrefix(dataURL, "data:")
+
+	// ";base64" 또는 ";" 이전 부분 추출
+	if idx := strings.Index(withoutPrefix, ";"); idx != -1 {
+		return withoutPrefix[:idx]
+	}
+
+	return withoutPrefix
+}
+
 // 파일 업로드 핸들러
 func uploadHandler(c *gin.Context) {
-	// 파일 또는 URL 확인
+	// 파일, URL, Base64 데이터 확인
 	file, fileHeader, fileErr := c.Request.FormFile("file")
 	url := c.PostForm("url")
+	base64Data := c.PostForm("base64_data")
+	originalFilenameParam := c.PostForm("original_filename")
 
-	// 파일과 URL 둘 다 제공되지 않은 경우
-	if fileErr != nil && url == "" {
-		respondWithProblem(c, http.StatusBadRequest, "파일 또는 URL을 제공해야 합니다.")
+	// 옵션 개수 확인
+	optionCount := 0
+	if fileErr == nil {
+		optionCount++
+	}
+	if url != "" {
+		optionCount++
+	}
+	if base64Data != "" {
+		optionCount++
+	}
+
+	// 아무것도 제공되지 않은 경우
+	if optionCount == 0 {
+		respondWithProblem(c, http.StatusBadRequest, "파일, URL, 또는 base64_data 중 하나를 제공해야 합니다.")
 		return
 	}
 
-	// 파일과 URL 둘 다 제공된 경우
-	if fileErr == nil && url != "" {
-		respondWithProblem(c, http.StatusBadRequest, "파일과 URL 중 하나만 제공해야 합니다.")
+	// 두 개 이상 제공된 경우
+	if optionCount > 1 {
+		respondWithProblem(c, http.StatusBadRequest, "파일, URL, base64_data 중 하나만 제공해야 합니다.")
 		return
 	}
 
@@ -208,7 +354,7 @@ func uploadHandler(c *gin.Context) {
 		}
 
 		originalFilename = fileHeader.Filename
-	} else {
+	} else if url != "" {
 		// URL에서 파일 다운로드 처리
 		fileContent, originalFilename, err = downloadFileFromURL(url)
 		if err != nil {
@@ -220,6 +366,37 @@ func uploadHandler(c *gin.Context) {
 		if int64(len(fileContent)) > MaxFileSize {
 			respondWithProblem(c, http.StatusRequestEntityTooLarge, "다운로드한 파일 크기가 너무 큽니다. (최대 100MB)")
 			return
+		}
+	} else if base64Data != "" {
+		// Base64 데이터 처리
+		var mimeType string
+		fileContent, mimeType, err = decodeBase64File(base64Data)
+		if err != nil {
+			respondWithProblem(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// 파일 크기 확인
+		if int64(len(fileContent)) > MaxFileSize {
+			respondWithProblem(c, http.StatusRequestEntityTooLarge, "디코딩된 파일 크기가 너무 큽니다. (최대 100MB)")
+			return
+		}
+
+		// 파일명 결정
+		if originalFilenameParam != "" {
+			originalFilename = originalFilenameParam
+		} else {
+			// 매직 넘버로 파일 형식 감지
+			ext, detectedMime := detectFileTypeFromBytes(fileContent)
+
+			// Data URL에서 MIME 타입이 있으면 그것을 우선 사용
+			if mimeType != "" && mimeType != detectedMime {
+				if mappedExt, ok := mimeToExtension[mimeType]; ok {
+					ext = mappedExt
+				}
+			}
+
+			originalFilename = "uploaded_file" + ext
 		}
 	}
 
